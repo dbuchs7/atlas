@@ -117,8 +117,15 @@ shares it, because the whole point of the artifact is that it leaves the system.
   reader actually searches is rendered as real text in the structured section
   below it.
 - **Follow-ups / risks to watch:** the store grows without bound (each version
-  keeps a PDF); ADR-0115's retention discipline should eventually cover it. A
-  future slice could diff two versions.
+  keeps a PDF). A version can be pruned by hand from the Documentation panel
+  (`DELETE /api/v1/documentation/{id}`, which takes its public link with it), so
+  a long history stays manageable; automatic retention along ADR-0115's
+  discipline is still the eventual cover. A future slice could diff two versions.
+- **Script tasks carry their code.** A documented `bpmn:ScriptTask` renders its
+  own source — the inline FEEL expression or the job-worker script (ADR-0047) —
+  in a monospaced block, so a reader sees what the step does, not only prose
+  about it. The code is snapshotted onto the version record by value, like the
+  rest of the element prose.
 
 ## Pros and cons of the options
 

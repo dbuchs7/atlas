@@ -18,6 +18,10 @@ const A4 = { width: 595.28, height: 841.89 };
 // to FALLBACK_WIDTH, which is the width of a lowercase letter — close enough for
 // line breaking, which is the only thing these numbers are used for.
 const FALLBACK_WIDTH = 556;
+// Courier is monospaced: every glyph advances the same 600/1000 em, so a code
+// block's width is just its character count. It backs the code() blocks that
+// render a script task's source (ADR-0143).
+const COURIER_WIDTH = 600;
 const HELVETICA_WIDTHS = [
   278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
   556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
@@ -66,7 +70,9 @@ export function toWinAnsi(text) {
 }
 
 // widthOf returns the rendered width of a string at a given size, in points.
-export function widthOf(text, size, bold) {
+// `mono` measures against Courier's fixed advance, for the code() blocks.
+export function widthOf(text, size, bold, mono) {
+  if (mono) return (toWinAnsi(text).length * COURIER_WIDTH * size) / 1000;
   const table = bold ? HELVETICA_BOLD_WIDTHS : HELVETICA_WIDTHS;
   let mille = 0;
   for (const code of toWinAnsi(text)) {
@@ -164,11 +170,12 @@ export class PdfDocument {
     return top;
   }
 
-  // text draws one line at the current cursor. Callers wrap first.
-  text(line, { size = 10, bold = false, color = [0, 0, 0], indent = 0 } = {}) {
+  // text draws one line at the current cursor. Callers wrap first. `mono` selects
+  // the Courier face for code.
+  text(line, { size = 10, bold = false, color = [0, 0, 0], indent = 0, mono = false } = {}) {
     const top = this.space(size * 1.35);
     const baseline = this.height - top - size;
-    const font = bold ? "/F2" : "/F1";
+    const font = mono ? "/F3" : bold ? "/F2" : "/F1";
     const [r, g, b] = color;
     this.current.ops.push(
       `BT ${num(r)} ${num(g)} ${num(b)} rg ${font} ${num(size)} Tf ` +
@@ -183,6 +190,23 @@ export class PdfDocument {
     const lines = wrapText(text, size, this.contentWidth - indent, opts.bold ?? false);
     for (const line of lines) this.text(line, { ...opts, size, indent });
     if (opts.after !== 0) this.y += opts.after ?? 4;
+  }
+
+  // code renders a block of source verbatim in the monospaced face, preserving
+  // each line's own indentation. A line too wide for the page is hard-wrapped by
+  // character, not reflowed, because in code the line breaks are meaningful. Tabs
+  // are expanded to spaces so indentation survives (a tab has no width table).
+  code(text, { size = 8.5, indent = 12, after = 8 } = {}) {
+    const maxWidth = this.contentWidth - indent;
+    const maxChars = Math.max(1, Math.floor(maxWidth / ((COURIER_WIDTH * size) / 1000)));
+    for (const rawLine of String(text ?? "").split(/\r?\n/)) {
+      const line = rawLine.replace(/\t/g, "    ");
+      // An empty line is still a line — render it so blank lines in the source
+      // are preserved and the block page-breaks the same as any other content.
+      const pieces = line.length > maxChars ? line.match(new RegExp(`.{1,${maxChars}}`, "g")) : [line];
+      for (const piece of pieces) this.text(piece, { size, mono: true, indent, color: [0.15, 0.15, 0.15] });
+    }
+    if (after !== 0) this.y += after;
   }
 
   // reserve breaks to a new page unless `points` of vertical space are left. It
@@ -296,7 +320,7 @@ export class PdfDocument {
     const endObject = () => push("endobj\n");
 
     const pageCount = this.pages.length;
-    const firstPageObj = 6;
+    const firstPageObj = 7;
     const firstContentObj = firstPageObj + pageCount;
     const firstImageObj = firstContentObj + pageCount;
     const totalObjects = firstImageObj + this.images.length - 1;
@@ -312,16 +336,19 @@ export class PdfDocument {
     push(`<< /Type /Pages /Count ${pageCount} /Kids [${kids}] >>\n`);
     endObject();
 
-    // 3, 4 Fonts
+    // 3, 4, 5 Fonts (regular, bold, and Courier for code blocks)
     startObject(3);
     push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\n");
     endObject();
     startObject(4);
     push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\n");
     endObject();
-
-    // 5 Info
     startObject(5);
+    push("<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>\n");
+    endObject();
+
+    // 6 Info
+    startObject(6);
     push(`<< /Title (${escapePdfString(toWinAnsi(this.title))}) /Producer (Atlas) /Creator (Atlas) >>\n`);
     endObject();
 
@@ -335,7 +362,7 @@ export class PdfDocument {
       startObject(firstPageObj + i);
       push(
         `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(this.width)} ${num(this.height)}] ` +
-        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjects} >> ` +
+        `/Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >>${xobjects} >> ` +
         `/Contents ${firstContentObj + i} 0 R >>\n`,
       );
       endObject();
@@ -371,7 +398,7 @@ export class PdfDocument {
       xref += String(objects[i - 1] ?? 0).padStart(10, "0") + " 00000 n \n";
     }
     push(xref);
-    push(`trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R /Info 5 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
+    push(`trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
 
     const out = new Uint8Array(offset);
     let at = 0;
