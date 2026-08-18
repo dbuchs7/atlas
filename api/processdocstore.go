@@ -36,6 +36,20 @@ type processDocElement struct {
 	// Lane names the swimlane the element sits in, empty when the model has none
 	// (ADR-0121).
 	Lane string `json:"lane,omitempty"`
+	// Script is the code a script task runs — the inline FEEL expression or the
+	// job-worker source (ADR-0047) — snapshotted so the record shows what the step
+	// does without opening the PDF. Nil for every element that is not a script task
+	// or that carries no code.
+	Script *processDocScript `json:"script,omitempty"`
+}
+
+// processDocScript is a script task's code as it was documented: the language and
+// the source, snapshotted by value so a later edit to the model cannot rewrite
+// what an already-published version says the step did.
+type processDocScript struct {
+	Language       string `json:"language,omitempty"`
+	Code           string `json:"code,omitempty"`
+	ResultVariable string `json:"resultVariable,omitempty"`
 }
 
 // processDoc is one published documentation version of a process: immutable

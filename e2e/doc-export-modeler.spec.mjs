@@ -121,6 +121,28 @@ test("sharing is per version: publishing v2 does not expose v1", async ({ page }
   await expect(page.locator(".doc-version").nth(1).locator("[data-share]")).toBeVisible();
 });
 
+test("an older version can be pruned so the history does not grow without bound", async ({ page }) => {
+  await page.locator("#docexport").click();
+  await page.locator("#doc-publish").click();
+  await page.locator("#doc-publish").click();
+  await expect(page.locator(".doc-version")).toHaveCount(2);
+
+  // Deleting is guarded by a confirmation — a history is worth pruning, but not
+  // by a stray click. Accept it, and name the version so the prompt is specific.
+  const messages = [];
+  page.on("dialog", (d) => { messages.push(d.message()); d.accept(); });
+
+  // Prune the oldest (v1); the newest stays, and its number is untouched.
+  await page.locator(".doc-version").nth(1).locator("[data-delete]").click();
+  await expect(page.locator(".doc-version")).toHaveCount(1);
+  await expect(page.locator(".doc-version").first()).toContainText("v2");
+  expect(messages.at(-1)).toContain("v1");
+
+  // And the last one can go too, leaving the empty state rather than a stale row.
+  await page.locator(".doc-version").first().locator("[data-delete]").click();
+  await expect(page.locator("#doc-history")).toContainText("No version published yet.");
+});
+
 test("a failure is reported in the panel rather than silently swallowed", async ({ page }) => {
   await page.locator("#docexport").click();
   await page.locator("#doc-publish").click();

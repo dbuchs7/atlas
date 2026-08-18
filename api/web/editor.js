@@ -5265,6 +5265,7 @@ function wireActions(root, modeler, api, toast, projectId) {
         <div class="row">
           <a class="doc-link" href="${esc(v.pdfUrl)}" target="_blank" rel="noopener">Open PDF</a>
           ${share}
+          <button class="btn ghost danger small" data-delete="${esc(v.id)}" data-version="${esc(v.version)}" title="Delete this version — its PDF and any public link are removed">Delete</button>
         </div>
       </div>`;
     }).join("");
@@ -5318,13 +5319,21 @@ function wireActions(root, modeler, api, toast, projectId) {
   // Sharing and revoking are delegated: the history is re-rendered on every
   // change, so binding per row would leak listeners.
   docHistory.addEventListener("click", async (e) => {
-    const shareId = e.target.getAttribute && e.target.getAttribute("data-share");
-    const unshareId = e.target.getAttribute && e.target.getAttribute("data-unshare");
-    if (!shareId && !unshareId) return;
+    if (!e.target.getAttribute) return;
+    const shareId = e.target.getAttribute("data-share");
+    const unshareId = e.target.getAttribute("data-unshare");
+    const deleteId = e.target.getAttribute("data-delete");
+    if (!shareId && !unshareId && !deleteId) return;
+    // Deleting a version drops its PDF and any public link for good — a history
+    // is worth pruning, but not by a stray click, so it is confirmed first.
+    if (deleteId && !window.confirm(
+      `Delete documentation version v${e.target.getAttribute("data-version")}? Its PDF and any public link are removed. This cannot be undone.`,
+    )) return;
     e.target.disabled = true;
     try {
       if (shareId) await api("POST", `/api/v1/documentation/${encodeURIComponent(shareId)}/share`);
-      else await api("DELETE", `/api/v1/documentation/${encodeURIComponent(unshareId)}/share`);
+      else if (unshareId) await api("DELETE", `/api/v1/documentation/${encodeURIComponent(unshareId)}/share`);
+      else await api("DELETE", `/api/v1/documentation/${encodeURIComponent(deleteId)}`);
       await loadDocHistory();
     } catch (err) {
       docErr.textContent = err.message;

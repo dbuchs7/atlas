@@ -90,6 +90,12 @@
           v.shareToken = method === "POST" ? (v.shareToken || "tok" + v.version) : "";
           return render(v);
         }
+        const delMatch = /\/api\/v1\/documentation\/([\w-]+)$/.exec(url);
+        if (delMatch && method === "DELETE") {
+          const i = versions.findIndex((x) => x.id === delMatch[1]);
+          if (i >= 0) versions.splice(i, 1); // pruning a missing version is a no-op, as the API is
+          return {};
+        }
         return {};
       };
 
