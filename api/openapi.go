@@ -344,6 +344,38 @@ func (s *Server) apiRoutes() []apiRoute {
 		{"DELETE", "/api/v1/public-links/{token}", s.handleRevokePublicLink, apiOp{
 			summary: "Revoke a public start link", tag: "Forms", resp: jsonBody("Revoked token", tObject())}},
 
+		// Process documentation (ADR-0138): a process published as one structured PDF
+		// — the diagram plus every element's documentation and annotations — as an
+		// immutable, per-process numbered version, optionally shared through a
+		// revocable public link. The document is produced in the browser, where
+		// bpmn-js already holds the authoritative picture; the server validates,
+		// numbers, stores, and serves it.
+		{"POST", "/api/v1/processes/{processId}/documentation", s.handleCreateProcessDoc, apiOp{
+			summary: "Publish the next documentation version of a process: the produced PDF plus the element prose it describes (ADR-0138)", tag: "Documentation",
+			req: jsonBody("Documentation upload", schemaObj(map[string]any{
+				"title": tString(), "note": tString(), "processName": tString(),
+				"xml": tString(), "elements": tArray(), "pdfBase64": tString(),
+			}, "pdfBase64")),
+			resp: jsonBody("The minted documentation version", tObject())}},
+		{"GET", "/api/v1/processes/{processId}/documentation", s.handleListProcessDocs, apiOp{
+			summary: "A process's documentation history, newest version first (ADR-0138)", tag: "Documentation",
+			resp: jsonBody("Documentation versions", tArray())}},
+		{"GET", "/api/v1/documentation/{id}", s.handleGetProcessDoc, apiOp{
+			summary: "Fetch one documentation version in full: metadata, per-element prose, and the BPMN source it was produced from (ADR-0138)", tag: "Documentation",
+			resp: jsonBody("Documentation version", tObject())}},
+		{"GET", "/api/v1/documentation/{id}/pdf", s.handleGetProcessDocPDF, apiOp{
+			summary: "Download a documentation version's PDF (ADR-0138)", tag: "Documentation",
+			resp: &bodySpec{mediaType: "application/pdf", schema: tString(), desc: "The published PDF document"}}},
+		{"POST", "/api/v1/documentation/{id}/share", s.handleShareProcessDoc, apiOp{
+			summary: "Share one documentation version: mint (or return) its revocable public link. Idempotent — a URL readers already hold never rotates (ADR-0138)", tag: "Documentation",
+			resp: jsonBody("The version with its share link", tObject())}},
+		{"DELETE", "/api/v1/documentation/{id}/share", s.handleUnshareProcessDoc, apiOp{
+			summary: "Revoke a documentation version's public link (ADR-0138)", tag: "Documentation",
+			resp: jsonBody("The version, now private", tObject())}},
+		{"DELETE", "/api/v1/documentation/{id}", s.handleDeleteProcessDoc, apiOp{
+			summary: "Prune a documentation version, taking its public link with it (ADR-0138)", tag: "Documentation",
+			status: http.StatusNoContent}},
+
 		// Process applications (ADR-0128) are the ADR-0034 project reframed as the
 		// design-time unit of bundling, versioning, and portability. The canonical
 		// surface is /api/v1/applications; each route binds to the same handler as

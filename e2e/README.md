@@ -61,6 +61,25 @@ it down afterwards. Use `npx playwright test --headed` to watch it, or
   with the other. This is the icon-and-property sync check: both directions, in a real
   browser, against the vendored bpmn-js.
 
+- **`pdf-writer.spec.mjs`** (ADR-0138): the dependency-free **PDF writer** behind the process
+  documentation export (`api/web/pdf.js`). A PDF is only valid if its cross-reference table
+  points at the exact byte offset of every object, so these build documents in the browser
+  and parse the bytes back: the xref lands on each object header, German text is encoded as
+  WinAnsi (not mojibake), `(`/`)`/`\` are escaped, long content flows onto numbered pages,
+  and a canvas JPEG is embedded untranscoded (`DCTDecode`) with a `/Length` that matches
+  what was written. Only a real browser can settle these — string encoding, `btoa`, and the
+  canvas JPEG encoder all behave differently outside one.
+
+- **`process-doc.spec.mjs`** (ADR-0138): the **documentation collector and layout**
+  (`api/web/process-doc.js`) against the real vendored bpmn-js — per-element
+  `<documentation>` and the `<textAnnotation>` notes associated with an element reach the
+  document, an annotation attached to nothing becomes a general note, lanes and unnamed
+  flows are left out, and the rasterized diagram is cropped to what is actually drawn.
+- **`doc-export-modeler.spec.mjs`** (ADR-0138): the **Documentation panel** in the Modeler
+  toolbar — publishing a numbered version with the model's prose and a real PDF, the
+  history reading newest first, and the per-version public link being minted and revoked.
+  Drives the real `mountEditor` against a mock `api` that keeps the versions in memory.
+
 Each spec loads its own model via `harness.html?model=…`; the `.bpmn` fixtures live here.
 
 ## Rendering a conformance gallery diagram

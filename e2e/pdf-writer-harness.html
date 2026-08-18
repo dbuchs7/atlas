@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Atlas PDF writer e2e harness</title>
+    <!-- Drives the real api/web/pdf.js. The writer produces a binary file format
+         whose cross-reference table must point at exact byte offsets, so it can
+         only be verified with real bytes from a real browser: string encoding,
+         btoa, and canvas JPEG encoding all behave differently outside one. The
+         helpers below hand the spec finished documents to inspect. -->
+  </head>
+  <body>
+    <script type="module">
+      import { PdfDocument, bytesToBase64, wrapText, widthOf, toWinAnsi } from "/pdf.js";
+
+      window.__pdf = { PdfDocument, bytesToBase64, wrapText, widthOf, toWinAnsi };
+
+      // asLatin1 renders a document's bytes as a JS string of char codes 0-255, so
+      // the spec can search the raw file for PDF syntax without a decoder mangling
+      // the binary parts.
+      window.__asLatin1 = (bytes) => {
+        let s = "";
+        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        return s;
+      };
+
+      // simpleDoc is a one-page document exercising text, headings, a rule, and a
+      // key/value row — including German umlauts, which only render correctly if
+      // the WinAnsi mapping is right.
+      window.__simpleDoc = () => {
+        const doc = new PdfDocument({ title: "Prozessdokumentation", footer: "Atlas" });
+        doc.heading("Reisebuchung", 1);
+        doc.keyValue("Prozess-ID", "reisebuchung");
+        doc.rule();
+        doc.heading("Flug buchen (Übersicht)", 2);
+        doc.paragraph("Ruft das Buchungssystem der Airline auf. Größere Änderungen müssen geprüft werden.");
+        return doc.bytes();
+      };
+
+      // longDoc overflows one page many times over, so the spec can prove pages
+      // are created and counted.
+      window.__longDoc = () => {
+        const doc = new PdfDocument({ title: "Lang", footer: "Atlas" });
+        for (let i = 0; i < 200; i++) doc.paragraph("Zeile " + i + " mit etwas Text dahinter.");
+        return doc.bytes();
+      };
+
+      // jpegBytes paints a canvas and returns its JPEG encoding plus dimensions —
+      // the same path the real export uses to turn the bpmn-js SVG into a raster.
+      window.__jpegBytes = async (w, h) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = "#3366cc";
+        ctx.fillRect(10, 10, w - 20, h - 20);
+        const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.9));
+        return new Uint8Array(await blob.arrayBuffer());
+      };
+
+      window.__docWithImage = async () => {
+        const jpeg = await window.__jpegBytes(400, 300);
+        const doc = new PdfDocument({ title: "Mit Diagramm", footer: "Atlas" });
+        doc.heading("Diagramm", 1);
+        doc.image(jpeg, 400, 300);
+        doc.paragraph("Unter dem Diagramm.");
+        return { bytes: doc.bytes(), jpeg };
+      };
+
+      window.__ready = true;
+    </script>
+  </body>
+</html>

@@ -9,6 +9,7 @@ import { attachJSONEditor } from "./json-editor.js";
 import { openDmnEditor } from "./dmn-editor.js";
 import { tokenSimulationModule } from "./token-simulation.js";
 import { attachCollab } from "./collab.js";
+import { collectDocumentation, exportDocumentation } from "./process-doc.js";
 
 // JOB_LANGS are the general-purpose script languages a script task can use besides
 // inline FEEL (ADR-0047). Each runs on a job worker off the engine's hot path; the
@@ -480,6 +481,7 @@ export async function mountEditor(root, { api, toast, key, draftId, projectId, p
         <button class="btn neutral" id="autolayout" title="Re-flow the diagram into a clean left-to-right layout (F8)">Auto-layout</button>
         <button class="btn neutral" id="save">Save</button>
         <button class="btn neutral" id="export">Export XML</button>
+        <button class="btn neutral" id="docexport" title="Publish this process as a structured PDF — the diagram plus every element's documentation and notes — as a numbered version you can share (ADR-0138)">Documentation</button>
         <button class="btn neutral" id="deploy" title="Deploy this single diagram. To ship a whole process application, use Publish on the application (ADR-0128).">Deploy</button>
       </div>
       <div class="sim-bar" id="sim-bar" hidden>
@@ -504,6 +506,18 @@ export async function mountEditor(root, { api, toast, key, draftId, projectId, p
         <span class="sim-hint" id="sim-hint"></span>
         <span style="flex:1"></span>
         <span class="sim-stats" id="sim-stats"></span>
+      </div>
+      <div class="start-panel" id="doc-panel" hidden>
+        <label class="field"><span>Title</span>
+          <input id="doc-title" placeholder="Leave empty to use the process name"/></label>
+        <label class="field"><span>Note for this version</span>
+          <input id="doc-note" placeholder="What changed, or what this version was signed off for"/></label>
+        <div class="row">
+          <button class="btn" id="doc-publish">Publish version</button>
+          <button class="btn neutral" id="doc-cancel">Close</button>
+          <span class="err" id="doc-err"></span>
+        </div>
+        <div class="doc-history" id="doc-history"></div>
       </div>
       <div class="start-panel" id="deploy-panel" hidden>
         <div id="deploy-body"></div>
@@ -5212,6 +5226,110 @@ function wireActions(root, modeler, api, toast, projectId) {
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) { toast("export failed: " + e.message, "err"); }
+  });
+
+  // Documentation (ADR-0138): publish the process as a structured PDF — the
+  // diagram plus every element's prose — as an immutable numbered version, and
+  // manage the revocable public link that puts a version in front of readers who
+  // have no Atlas account. The document is produced here in the browser, where
+  // the authoritative picture already lives; the panel is the whole surface.
+  const docBtn = root.querySelector("#docexport");
+  const docPanel = root.querySelector("#doc-panel");
+  const docErr = root.querySelector("#doc-err");
+  const docHistory = root.querySelector("#doc-history");
+  const docPublish = root.querySelector("#doc-publish");
+  const closeDoc = () => { docPanel.hidden = true; docErr.textContent = ""; };
+
+  // renderDocHistory draws one process's published versions, newest first, each
+  // with its download and its sharing state. Sharing is per version, so every
+  // row carries its own control.
+  const renderDocHistory = (versions) => {
+    if (!versions.length) {
+      docHistory.innerHTML = `<p class="muted doc-empty">No version published yet.</p>`;
+      return;
+    }
+    docHistory.innerHTML = versions.map((v) => {
+      const when = v.createdAt ? new Date(v.createdAt * 1000).toLocaleString() : "";
+      const by = v.createdBy ? " · " + esc(v.createdBy) : "";
+      const note = v.note ? `<div class="doc-note">${esc(v.note)}</div>` : "";
+      const share = v.shareUrl
+        ? `<a class="doc-link" href="${esc(v.shareUrl)}" target="_blank" rel="noopener">Public link</a>
+           <button class="btn neutral small" data-unshare="${esc(v.id)}">Revoke</button>`
+        : `<button class="btn neutral small" data-share="${esc(v.id)}">Share…</button>`;
+      return `<div class="doc-version">
+        <div class="doc-version-head">
+          <b>v${v.version}</b>
+          <span class="muted">${esc(when)}${by} · ${v.elementCount} elements</span>
+        </div>
+        ${note}
+        <div class="row">
+          <a class="doc-link" href="${esc(v.pdfUrl)}" target="_blank" rel="noopener">Open PDF</a>
+          ${share}
+        </div>
+      </div>`;
+    }).join("");
+  };
+
+  // loadDocHistory reads the history for whatever process the diagram currently
+  // declares. A diagram that has never been documented simply has none.
+  const loadDocHistory = async () => {
+    const collection = collectDocumentation(modeler);
+    if (!collection.processId) { docHistory.innerHTML = ""; return; }
+    try {
+      const versions = await api("GET", `/api/v1/processes/${encodeURIComponent(collection.processId)}/documentation`);
+      renderDocHistory(versions || []);
+    } catch (e) {
+      docHistory.innerHTML = `<p class="err">${esc(e.message)}</p>`;
+    }
+  };
+
+  const openDoc = async () => {
+    docPanel.hidden = false;
+    docErr.textContent = "";
+    const bo = rootProcess(modeler);
+    const titleField = root.querySelector("#doc-title");
+    if (!titleField.value) titleField.value = (bo && bo.name) || "";
+    docHistory.innerHTML = `<p class="muted doc-empty">Loading…</p>`;
+    await loadDocHistory();
+  };
+
+  docBtn.addEventListener("click", () => { docPanel.hidden ? openDoc() : closeDoc(); });
+  root.querySelector("#doc-cancel").addEventListener("click", closeDoc);
+
+  docPublish.addEventListener("click", async () => {
+    docPublish.disabled = true;
+    docErr.textContent = "";
+    try {
+      await exportDocumentation({
+        modeler, api,
+        title: root.querySelector("#doc-title").value.trim(),
+        note: root.querySelector("#doc-note").value.trim(),
+      });
+      root.querySelector("#doc-note").value = "";
+      toast("Documentation version published", "ok");
+      await loadDocHistory();
+    } catch (e) {
+      docErr.textContent = e.message;
+    } finally {
+      docPublish.disabled = false;
+    }
+  });
+
+  // Sharing and revoking are delegated: the history is re-rendered on every
+  // change, so binding per row would leak listeners.
+  docHistory.addEventListener("click", async (e) => {
+    const shareId = e.target.getAttribute && e.target.getAttribute("data-share");
+    const unshareId = e.target.getAttribute && e.target.getAttribute("data-unshare");
+    if (!shareId && !unshareId) return;
+    e.target.disabled = true;
+    try {
+      if (shareId) await api("POST", `/api/v1/documentation/${encodeURIComponent(shareId)}/share`);
+      else await api("DELETE", `/api/v1/documentation/${encodeURIComponent(unshareId)}/share`);
+      await loadDocHistory();
+    } catch (err) {
+      docErr.textContent = err.message;
+      e.target.disabled = false;
+    }
   });
 
   // Deploy opens a panel that offers two actions: "Deploy only" makes the model

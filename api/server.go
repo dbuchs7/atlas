@@ -172,6 +172,8 @@ type Server struct {
 	deployTokens     *deployTokenIndex    // in-memory hash->token index, read on the handler goroutine
 	targets          *targetStore         // durable sidecar for peer deployment targets (ADR-0129)
 	appVersions      map[string]int32     // applicationId → highest release version published (ADR-0128)
+	processDocs      *processDocStore     // durable sidecar for process documentation versions (ADR-0138)
+	docVersions      map[string]int32     // bpmnProcessId → highest documentation version published (ADR-0138)
 	systemPIDs       map[string]bool      // process ids of the bootstrap-deployed platform processes, protected from deletion (ADR-0122)
 	deploySysProcs   bool                 // opt-in: bootstrap-deploy the embedded platform processes at startup (ADR-0122)
 	userProvisioning bool                 // opt-in: enable the user-provisioning connector for system processes (ADR-0123)
@@ -613,6 +615,10 @@ func New(proc *engine.Processor, store *state.Store, dataDir string, opts ...Opt
 	if err != nil {
 		return nil, err
 	}
+	processDocs, err := newProcessDocStore(filepath.Join(dataDir, "process-docs"))
+	if err != nil {
+		return nil, err
+	}
 	releases, err := newReleaseStore(filepath.Join(dataDir, "releases"))
 	if err != nil {
 		return nil, err
@@ -685,6 +691,8 @@ func New(proc *engine.Processor, store *state.Store, dataDir string, opts ...Opt
 		deployTokens:      newDeployTokenIndex(),
 		targets:           targets,
 		appVersions:       map[string]int32{},
+		processDocs:       processDocs,
+		docVersions:       map[string]int32{},
 		dmnrefs:           dmnrefs,
 		connectors:        connectors,
 		callOverrides:     callOverrides,
@@ -819,6 +827,11 @@ func New(proc *engine.Processor, store *state.Store, dataDir string, opts ...Opt
 	// Rebuild the per-application release counter from the durable release records,
 	// so the next publish after a restart continues the sequence (ADR-0128).
 	if err := s.loadReleaseVersions(); err != nil {
+		return nil, err
+	}
+	// Same discipline for the per-process documentation counter, so an export after
+	// a restart continues the sequence instead of minting a second v1 (ADR-0138).
+	if err := s.loadProcessDocVersions(); err != nil {
 		return nil, err
 	}
 	// Peer deploy tokens (ADR-0129) into the in-memory index the auth middleware
@@ -1301,6 +1314,7 @@ func (s *Server) Handler() http.Handler {
 	// Public, unauthenticated start links (ADR-0029). These live under /public/,
 	// outside the /api/v1 surface auth gates, and expose exactly one thing: the
 	// start form for one token. They are rate-limited in the handlers.
+	mux.HandleFunc("GET "+publicProcessDocPath+"{token}", s.handlePublicProcessDoc)
 	mux.HandleFunc("GET /public/forms/{token}", s.handlePublicFormPage)
 	mux.HandleFunc("GET /public/forms/{token}/schema", s.handlePublicFormSchema)
 	mux.HandleFunc("POST /public/forms/{token}/start", s.handlePublicFormStart)

@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Atlas documentation export modeler e2e harness</title>
+    <!-- Drives the *real* api/web/editor.js mountEditor against a mock `api` that
+         behaves like the ADR-0138 documentation routes, so the test can prove the
+         Documentation panel publishes a version, lists the history newest first,
+         and shares and revokes a version's public link. Mounted in deployment
+         mode (key set, draftId null) so no live collaboration SSE is attached. -->
+    <link rel="stylesheet" href="/app.css" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #fff; }
+      :root { --topbar-h: 0px; }
+    </style>
+  </head>
+  <body>
+    <div id="view" style="height:100vh"></div>
+    <script type="module">
+      import { mountEditor } from "/editor.js";
+
+      const view = document.getElementById("view");
+      const noop = () => {};
+
+      const XML = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_docexp" targetNamespace="http://atlas/bpmn">
+  <bpmn:process id="reisebuchung" name="Reisebuchung" isExecutable="true">
+    <bpmn:startEvent id="Start_1" name="Anfrage"><bpmn:outgoing>f0</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:serviceTask id="Task_buchen" name="Flug buchen">
+      <bpmn:documentation>Ruft das Buchungssystem der Airline auf.</bpmn:documentation>
+      <bpmn:incoming>f0</bpmn:incoming><bpmn:outgoing>f1</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_1"><bpmn:incoming>f1</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="f0" sourceRef="Start_1" targetRef="Task_buchen"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="Task_buchen" targetRef="End_1"/>
+    <bpmn:textAnnotation id="note_1"><bpmn:text>Benötigt IATA-Zugang</bpmn:text></bpmn:textAnnotation>
+    <bpmn:association id="assoc_1" sourceRef="Task_buchen" targetRef="note_1"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="D"><bpmndi:BPMNPlane id="P" bpmnElement="reisebuchung">
+    <bpmndi:BPMNShape id="Start_1_di" bpmnElement="Start_1"><dc:Bounds x="160" y="120" width="36" height="36"/></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_buchen_di" bpmnElement="Task_buchen"><dc:Bounds x="260" y="98" width="100" height="80"/></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_1_di" bpmnElement="End_1"><dc:Bounds x="420" y="120" width="36" height="36"/></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="note_1_di" bpmnElement="note_1"><dc:Bounds x="260" y="220" width="150" height="40"/></bpmndi:BPMNShape>
+    <bpmndi:BPMNEdge id="f0_di" bpmnElement="f0"><di:waypoint x="196" y="138"/><di:waypoint x="260" y="138"/></bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="360" y="138"/><di:waypoint x="420" y="138"/></bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="assoc_1_di" bpmnElement="assoc_1"><di:waypoint x="310" y="178"/><di:waypoint x="310" y="220"/></bpmndi:BPMNEdge>
+  </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+      // A stand-in for the documentation routes, keeping the versions in memory so
+      // the panel's publish → list → share → revoke roundtrip is real.
+      let nextVersion = 1;
+      const versions = [];
+      window.__versions = versions;
+      window.__uploads = [];
+
+      const render = (v) => ({
+        id: v.id, processId: v.processId, version: v.version, title: v.title, note: v.note,
+        createdAt: v.createdAt, createdBy: v.createdBy, elementCount: v.elementCount,
+        pdfUrl: "/api/v1/documentation/" + v.id + "/pdf",
+        ...(v.shareToken ? { shareToken: v.shareToken, shareUrl: "/public/process-docs/" + v.shareToken } : {}),
+      });
+
+      const api = async (method, url, body) => {
+        if (method === "GET" && /\/processes\/[\w-]+\/xml$/.test(url)) return XML;
+        if (method === "GET" && /\/processes$/.test(url)) return [];
+        if (method === "GET" && /\/drafts$/.test(url)) return [];
+        if (method === "GET" && /\/decisions/.test(url)) return [];
+        if (method === "POST" && /\/validate$/.test(url)) return { version: "test", problems: [] };
+
+        const docMatch = /\/api\/v1\/processes\/([\w-]+)\/documentation$/.exec(url);
+        if (docMatch && method === "POST") {
+          window.__uploads.push(body);
+          const v = {
+            id: "doc" + nextVersion, processId: docMatch[1], version: nextVersion++,
+            title: body.title, note: body.note, createdAt: 1755500000 + nextVersion,
+            createdBy: "ada", elementCount: (body.elements || []).length, shareToken: "",
+          };
+          versions.push(v);
+          return render(v);
+        }
+        if (docMatch && method === "GET") {
+          return versions.filter((v) => v.processId === docMatch[1])
+            .slice().sort((a, b) => b.version - a.version).map(render);
+        }
+        const shareMatch = /\/api\/v1\/documentation\/([\w-]+)\/share$/.exec(url);
+        if (shareMatch) {
+          const v = versions.find((x) => x.id === shareMatch[1]);
+          if (!v) throw new Error("no documentation version with that id");
+          v.shareToken = method === "POST" ? (v.shareToken || "tok" + v.version) : "";
+          return render(v);
+        }
+        return {};
+      };
+
+      window.__mount = () => mountEditor(view, { api, toast: noop, key: 42 });
+      window.__ready = true;
+    </script>
+  </body>
+</html>

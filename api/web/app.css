@@ -904,6 +904,22 @@ label.field > span { display: block; font-size: 12px; color: var(--muted); margi
 .start-panel .row { align-items: center; gap: 8px; }
 .start-panel .err { font-size: 12px; color: var(--danger, #c0392b); }
 
+/* Process documentation (ADR-0138): the published versions of one process, newest
+   first. Each row is one immutable version — its download and, when someone has
+   published it, the revocable public link. */
+.doc-history { margin-top: 12px; max-height: 260px; overflow-y: auto; }
+.doc-history .doc-empty { margin: 4px 0; font-size: 13px; }
+.doc-version {
+  padding: 8px 0; border-top: 1px solid var(--border);
+}
+.doc-version:first-child { border-top: none; }
+.doc-version-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.doc-version-head .muted { font-size: 12px; }
+.doc-version .doc-note { margin: 2px 0 4px; font-size: 12px; }
+.doc-version .row { gap: 8px; align-items: center; margin-top: 2px; }
+.doc-link { font-size: 12px; }
+.btn.small { padding: 2px 8px; font-size: 12px; }
+
 /* The Deploy & run confirmation: a success line plus the link that completes the
    deploy→run→observe roundtrip into Operations. */
 .deploy-success .deploy-success-msg { margin: 0 0 10px; font-weight: 600; color: var(--ok); }

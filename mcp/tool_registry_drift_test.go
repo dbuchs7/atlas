@@ -229,6 +229,22 @@ var mcpOmittedRoutes = map[string]string{
 	"GET /api/v1/applications/{id}/source": "bulk source-tree download; an agent reads artifacts individually via atlas_get_draft_xml / atlas_get_form",
 	"POST /api/v1/applications/source":     "bulk source-tree upload that rewrites a whole application; an agent authors via atlas_save_draft / atlas_save_form",
 
+	// Process documentation (ADR-0138): the document is *produced in the browser*,
+	// where bpmn-js holds the authoritative picture — an agent has no rendered
+	// diagram to publish, so the create route is not a capability it can exercise.
+	// The reads are of the produced artifact rather than of the model: an agent
+	// that wants to know what a process does reads the model itself via
+	// atlas_get_draft_xml / atlas_get_process_xml. Sharing is a publication
+	// decision — it puts a process in front of an audience outside Atlas — and
+	// belongs to the human making it.
+	"POST /api/v1/processes/{processId}/documentation": "the document is rendered in the browser; an agent has no diagram raster to publish",
+	"GET /api/v1/processes/{processId}/documentation":  "history of a published artifact; an agent reads the model itself via atlas_get_process_xml",
+	"GET /api/v1/documentation/{id}":                   "a published artifact's record; an agent reads the model itself via atlas_get_process_xml",
+	"GET /api/v1/documentation/{id}/pdf":               "binary document download is not an agent capability",
+	"POST /api/v1/documentation/{id}/share":            "publishing a process to an audience outside Atlas is a human decision, not an agent action",
+	"DELETE /api/v1/documentation/{id}/share":          "revoking a publication is a human decision, not an agent action",
+	"DELETE /api/v1/documentation/{id}":                "pruning published history is a human decision, not an agent action",
+
 	// Secrets: credential storage; an agent must never read or write it.
 	"GET /api/v1/secrets":           "credential storage is not an agent capability",
 	"PUT /api/v1/secrets/{name}":    "credential storage is not an agent capability",
