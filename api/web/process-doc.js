@@ -55,6 +55,38 @@ export function typeLabel(type) {
   return TYPE_LABELS[type] || String(type || "").replace(/^bpmn:/, "");
 }
 
+// A readable name for the language a script task's code is written in. A script
+// task carries either an inline FEEL expression (run in the engine) or a job
+// worker's source in one of the supported languages (ADR-0047).
+const SCRIPT_LANG_LABELS = {
+  feel: "FEEL (in-engine)",
+  powershell: "PowerShell",
+  python: "Python",
+  javascript: "JavaScript",
+};
+
+export function scriptLangLabel(lang) {
+  return SCRIPT_LANG_LABELS[lang] || String(lang || "");
+}
+
+// scriptOf reads the code a script task runs, so the document shows what the step
+// actually does rather than only prose about it. Two shapes carry it: an
+// <atlas:jobScript> (a job-worker language, its `source` the code) or a
+// <zeebe:script> (an inline FEEL expression). Returns null for anything else —
+// only a script task carries these, and only when the modeller filled them in.
+export function scriptOf(bo) {
+  const values = (bo && bo.extensionElements && bo.extensionElements.values) || [];
+  const job = values.find((v) => v.$type === "atlas:JobScript");
+  if (job && (job.source || "").trim()) {
+    return { language: job.language || "powershell", code: String(job.source).trim(), resultVariable: job.resultVariable || "" };
+  }
+  const feel = values.find((v) => v.$type === "zeebe:Script");
+  if (feel && (feel.expression || "").trim()) {
+    return { language: "feel", code: String(feel.expression).trim(), resultVariable: feel.resultVariable || "" };
+  }
+  return null;
+}
+
 // documentationOf reads an element's <bpmn:documentation>. BPMN allows several
 // entries; they are joined into one block of prose.
 export function documentationOf(bo) {
@@ -141,6 +173,8 @@ export function collectDocumentation(modeler) {
       documentation: documentationOf(bo),
       annotations: annotationsFor.get(bo.id) || [],
       lane: laneOf.get(bo.id) || "",
+      // A script task also carries the code it runs; null for every other type.
+      script: bo.$type === "bpmn:ScriptTask" ? scriptOf(bo) : null,
     });
   }
 
@@ -344,6 +378,16 @@ export function buildDocumentationPdf(spec) {
     }
     for (const note of el.annotations) {
       doc.paragraph("Note: " + note, { size: 9.5, indent: 12, after: 4 });
+    }
+    // A script task's own code, rendered verbatim in a monospaced block. The
+    // whole point is that a reader outside Atlas sees what the step actually
+    // does, not just prose about it.
+    if (el.script && el.script.code) {
+      doc.paragraph("Script (" + scriptLangLabel(el.script.language) + ")", { size: 9, bold: true, color: GREY, after: 2 });
+      doc.code(el.script.code);
+      if (el.script.resultVariable) {
+        doc.paragraph("Result variable: " + el.script.resultVariable, { size: 9, color: GREY, after: 6 });
+      }
     }
     doc.y += 4;
   }

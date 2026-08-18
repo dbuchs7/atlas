@@ -83,6 +83,47 @@ test("elements are selected and ordered so the document reads like the process",
   expect(again).toEqual(ids);
 });
 
+test("a script task carries the code it runs, so the reader sees what the step does", async ({ page }) => {
+  const el = await page.evaluate(() => {
+    const c = window.__doc.collectDocumentation(window.__modeler);
+    return c.elements.find((e) => e.id === "Task_preis");
+  });
+  expect(el.type).toBe("bpmn:ScriptTask");
+  expect(el.script.language).toBe("powershell");
+  expect(el.script.resultVariable).toBe("Preis");
+  // The source is captured verbatim, its own line breaks intact — code is not
+  // prose, and reflowing it would change what it says.
+  expect(el.script.code).toBe("$total = $Betrag * 1.1\nWrite-Output $total");
+
+  // A FEEL script task carries its inline expression the same way, read from the
+  // other extension shape the engine runs (<zeebe:script>).
+  const feel = await page.evaluate(() =>
+    window.__doc.scriptOf({
+      extensionElements: { values: [{ $type: "zeebe:Script", expression: "=Betrag * 1.1", resultVariable: "Preis" }] },
+    }));
+  expect(feel).toEqual({ language: "feel", code: "=Betrag * 1.1", resultVariable: "Preis" });
+});
+
+test("the built document prints the script task's code in a monospaced block", async ({ page }) => {
+  const raw = await page.evaluate(async () => {
+    const collection = window.__doc.collectDocumentation(window.__modeler);
+    const bytes = window.__doc.buildDocumentationPdf({ collection, title: "Reisebuchung", version: 1 });
+    return window.__asLatin1(bytes);
+  });
+
+  // The step is named, its language stated, and its actual source is in the file —
+  // both lines of it — set in the Courier face the code() block selects. The
+  // parentheses around the language are backslash-escaped, as a PDF literal
+  // string requires.
+  expect(raw).toContain("Preis berechnen");
+  expect(raw).toContain("Script \\(PowerShell\\)");
+  expect(raw).toContain("$total = $Betrag * 1.1");
+  expect(raw).toContain("Write-Output $total");
+  expect(raw).toContain("Result variable: Preis");
+  expect(raw).toContain("/BaseFont /Courier");
+  expect(raw).toContain("/F3");
+});
+
 test("the diagram rasterizes to a JPEG with its blank margin trimmed off", async ({ page }) => {
   const out = await page.evaluate(async () => {
     const { svg } = await window.__modeler.saveSVG();
